@@ -1,5 +1,7 @@
 # sds-terraform
 
+6230096621 Chonlakorn Maturosjamnan
+
 to prepare resource run this script (for m1 user, you need to install template file package helper due to package unavailable: https://discuss.hashicorp.com/t/template-v2-2-0-does-not-have-a-package-available-mac-m1/35099/3)
 
 `terraform init` 
