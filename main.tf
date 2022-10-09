@@ -13,18 +13,20 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-east-1"
-  #var later
+  region = var.region
 }
 
-resource "aws_key_pair" "key_pair_test" {
-  key_name   = "key_pair_test"
-  public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDGD/z0j+e/Hmvlu9nDnXejNZ6m1ftw4LM/q1za4lfJG2rLg2iJRS3RCDw4tONccxdJhDaNU7fCvP2WdQqMRCodFWckXmgTq438MhTKOXLfYVySOIQjemDG2M9mja7NPaVdlEgfsmIOxj4VlNVN3MaV8guakmv49WAlkwRIYI0o7CGWEcPGXF2vFVy+nFvxAGkGQYe2NaCHWMvo4NZQcwekg9e4elkDGRMfHglyH7nHounJC2Qarf2J81sS2jx8fRY7p9s6phGP2e/xnPnEYmpU17qbgvjqOj+tz1wW40WECIJswqCG5uTP7KfGdJMe1M95GVULNidVK57F/JxI380KtSNaHFH+sarlzwdMQZqCM0Cz5ue4ksnJnzAjjYFdiKRpgzUElP4C+KqAsveWXudWZZgQ+Z5zjNCW+pe/LHNVmlvObgdmWIHu1dXPpQIPA53AijiMkixFhzPp5p1lPMIeZSHA8Si15326E7XlzLJfV0l1v9ELy5bPHIV0KzqkogM= grniss@chol-macbook.local"
+resource "tls_private_key" "key_pair" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 
-  # var later
+resource "aws_key_pair" "key_pair" {
+  key_name   = "key_pair"
+  public_key = tls_private_key.key_pair.public_key_openssh
 
   tags = {
-    Name = "key_pair_test"
+    Name = "key_pair"
   }
 }
 
@@ -36,16 +38,10 @@ resource "aws_vpc" "vpc1" {
   }
 }
 
-
-# data "aws_availability_zone" "az" {
-#   state = "available"
-# }
-
 resource "aws_subnet" "subnet_public" {
   vpc_id            = aws_vpc.vpc1.id
   cidr_block        = "10.0.0.0/26"
-  availability_zone = "us-east-1a"
-  # var later
+  availability_zone = var.availability_zone
 
   tags = {
     Name = "subnet_public"
@@ -55,8 +51,7 @@ resource "aws_subnet" "subnet_public" {
 resource "aws_subnet" "subnet_link" {
   vpc_id            = aws_vpc.vpc1.id
   cidr_block        = "10.0.0.64/26"
-  availability_zone = "us-east-1a"
-  # var later
+  availability_zone = var.availability_zone
 
   tags = {
     Name = "subnet_link"
@@ -66,8 +61,7 @@ resource "aws_subnet" "subnet_link" {
 resource "aws_subnet" "subnet_private" {
   vpc_id            = aws_vpc.vpc1.id
   cidr_block        = "10.0.0.128/26"
-  availability_zone = "us-east-1a"
-  # var later
+  availability_zone = var.availability_zone
 
   tags = {
     Name = "subnet_private"
@@ -77,8 +71,7 @@ resource "aws_subnet" "subnet_private" {
 resource "aws_subnet" "subnet_vpc" {
   vpc_id            = aws_vpc.vpc1.id
   cidr_block        = "10.0.0.192/26"
-  availability_zone = "us-east-1a"
-  # var later
+  availability_zone = var.availability_zone
 
   tags = {
     Name = "subnet_vpc"
@@ -164,30 +157,10 @@ resource "aws_security_group" "security_group_db" {
   }
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  owners = ["099720109477"] # Canonical
-}
-
 resource "aws_network_interface" "eni_public" {
   subnet_id       = aws_subnet.subnet_public.id
   security_groups = [aws_security_group.security_group_app.id]
 
-  # attachment {
-  #   instance     = aws_instance.ec2_instance_app.id
-  #   device_index = 0
-  # }
   tags = {
     Name = "eni_public"
   }
@@ -220,13 +193,23 @@ resource "aws_network_interface" "eni_private" {
   }
 }
 
+
+data "template_file" "init_mariadb" {
+  template = file("./maria.sh.tpl")
+
+  vars = {
+    database_name = "${var.database_name}"
+    database_user = "${var.database_user}"
+    database_pass = "${var.database_pass}"
+  }
+}
+
 resource "aws_instance" "ec2_instance_db" {
-  ami               = data.aws_ami.ubuntu.id
+  ami               = var.ami
   instance_type     = "t2.micro"
-  availability_zone = "us-east-1a"
-  key_name          = aws_key_pair.key_pair_test.key_name
-  user_data         = file("./maria.sh")
-  # var later
+  availability_zone = var.availability_zone
+  key_name          = aws_key_pair.key_pair.key_name
+  user_data         = data.template_file.init_mariadb.rendered
 
   network_interface {
     device_index         = 0
@@ -248,17 +231,21 @@ data "template_file" "init_wordpress" {
 
   vars = {
     private_ip_db = "${aws_instance.ec2_instance_db.private_ip}"
+    database_name = "${var.database_name}"
+    database_user = "${var.database_user}"
+    database_pass = "${var.database_pass}"
+    admin_user    = "${var.admin_user}"
+    admin_pass    = "${var.admin_pass}"
   }
 }
 
-resource "aws_instance" "ec2_instance_app" {
-  ami               = data.aws_ami.ubuntu.id
-  instance_type     = "t2.micro"
-  availability_zone = "us-east-1a"
-  key_name          = aws_key_pair.key_pair_test.key_name
-  user_data         = data.template_file.init_wordpress.rendered
 
-  # var later
+resource "aws_instance" "ec2_instance_app" {
+  ami               = var.ami
+  instance_type     = "t2.micro"
+  availability_zone = var.availability_zone
+  key_name          = aws_key_pair.key_pair.key_name
+  user_data         = data.template_file.init_wordpress.rendered
 
   network_interface {
     device_index         = 0
@@ -297,7 +284,6 @@ resource "aws_eip" "elastic_ip_public" {
 resource "aws_eip" "elastic_ip_nat" {
   vpc = true
 
-  # network_interface = aws_network_interface.eni_nat.id
   depends_on = [aws_internet_gateway.igw]
 
   tags = {
@@ -350,7 +336,7 @@ resource "aws_route_table_association" "route_table_association_vpc" {
   route_table_id = aws_route_table.route_table_vpc.id
 }
 
-resource "aws_route_table" "route_table_nat" {
+resource "aws_route_table" "route_table_private" {
   vpc_id = aws_vpc.vpc1.id
 
   route {
@@ -359,11 +345,112 @@ resource "aws_route_table" "route_table_nat" {
   }
 
   tags = {
-    Name = "route_table_nat"
+    Name = "route_table_private"
   }
 }
 
-resource "aws_route_table_association" "route_table_association_nat" {
+resource "aws_route_table_association" "route_table_association_private" {
   subnet_id      = aws_subnet.subnet_private.id
-  route_table_id = aws_route_table.route_table_nat.id
+  route_table_id = aws_route_table.route_table_private.id
+}
+
+
+resource "aws_s3_bucket" "s3_bucket" {
+  bucket = var.bucket_name
+
+  tags = {
+    "Name" = "s3_bucket"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "publiic_access_block_for_wordpress" {
+  bucket = aws_s3_bucket.s3_bucket.id
+
+  block_public_acls       = false
+  block_public_policy     = true
+  ignore_public_acls      = false
+  restrict_public_buckets = true
+}
+
+data "aws_iam_policy_document" "iam_policy_for_s3_user" {
+  statement {
+    sid = "1"
+
+    actions = [
+      "s3:PutObject",
+      "s3:GetObjectAcl",
+      "s3:GetObject",
+      "s3:PutBucketAcl",
+      "s3:ListBucket",
+      "s3:DeleteObject",
+      "s3:GetBucketAcl",
+      "s3:GetBucketLocation",
+      "s3:PutObjectAcl"
+    ]
+
+    resources = [
+      "arn:aws:s3:::${var.bucket_name}",
+      "arn:aws:s3:::${var.bucket_name}/*"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "iam_policy" {
+  name   = "iam_policy"
+  path   = "/"
+  policy = data.aws_iam_policy_document.iam_policy_for_s3_user.json
+
+}
+
+resource "aws_iam_user" "iam_user" {
+  name = "iam_user"
+}
+
+resource "aws_iam_policy_attachment" "iam_policy_attachment" {
+  name       = "iam_policy_attachment"
+  users      = [aws_iam_user.iam_user.name]
+  policy_arn = aws_iam_policy.iam_policy.arn
+}
+
+resource "aws_iam_access_key" "iam_access_key" {
+  user = aws_iam_user.iam_user.name
+}
+
+locals {
+  s3_plugin_script = <<EOF
+  '/.* Add any custom values.*/a define("AS3CF_SETTINGS", serialize( array(\n    "provider" => "aws",\n    "access-key-id" => "${aws_iam_access_key.iam_access_key.id}",\n    "secret-access-key" => "${aws_iam_access_key.iam_access_key.secret}",\n    "use-server-roles" => true,\n    "bucket" => "${var.bucket_name}",\n    "region" => "${var.region}",\n    "copy-to-s3" => true,\n    "enable-object-prefix" => true,\n    "object-prefix" => "wp-content/uploads/",\n    "use-yearmonth-folders" => true,\n    "object-versioning" => true,\n    "delivery-provider" => "storage",\n    "delivery-provider-name" => "${var.bucket_name}",\n    "serve-from-s3" => true,\n    "enable-delivery-domain" => false,\n    "delivery-domain" => "cdn.example.com",\n    "enable-signed-urls" => false,\n    "force-https" => false,\n    "remove-local-file" => false,\n) ) );' wp-config.php
+  EOF
+}
+
+resource "null_resource" "wp_setup" {
+
+  depends_on = [
+    aws_instance.ec2_instance_app,
+    aws_instance.ec2_instance_db,
+  ]
+
+  connection {
+    type        = "ssh"
+    user        = "ubuntu"
+    private_key = tls_private_key.key_pair.private_key_pem
+    host        = aws_eip.elastic_ip_public.public_ip
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "cloud-init status --wait",
+      "timeout 120 sh -c 'until nc -z $0 $1; do sleep 1; done' ${aws_instance.ec2_instance_db.private_ip} 3306",
+      "sudo wp config create --dbname=${var.database_name} --dbuser=${var.database_user} --dbpass=${var.database_pass} --dbhost=${aws_instance.ec2_instance_db.private_ip} --path=/var/www/html --allow-root",
+      "sudo chown -R ubuntu:www-data /var/www/html",
+      "sudo chmod -R 774 /var/www/html",
+      "sudo rm /var/www/html/index.html",
+      "sudo systemctl restart apache2",
+
+      "wp core install --url=${aws_eip.elastic_ip_public.public_ip} --title=wp101 --admin_user=${var.admin_user} --admin_password=${var.admin_pass} --admin_email=no@email.com --skip-email --path=/var/www/html",
+      "cd /var/www/html",
+      "sed -i ${local.s3_plugin_script}",
+      "wp plugin install amazon-s3-and-cloudfront",
+      "wp plugin activate amazon-s3-and-cloudfront",
+    ]
+  }
 }

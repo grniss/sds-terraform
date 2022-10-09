@@ -1,5 +1,5 @@
 #!/bin/bash
-sudo apt update
+sudo apt update -y
 sudo apt install -y mariadb-server
 
 sudo mysql_secure_installation <<EOF
@@ -11,17 +11,17 @@ n
 EOF
 
 sudo mysql << EOF 
-CREATE DATABASE wordpress;
+CREATE DATABASE ${database_name};
 
 GRANT ALL ON *.* TO 'admin' @'localhost' IDENTIFIED BY 'password' WITH GRANT OPTION;
 
-CREATE USER 'wp' @'localhost' IDENTIFIED BY 'wordpress101';
+CREATE USER '${database_user}' @'localhost' IDENTIFIED BY '${database_pass}';
 
-GRANT ALL PRIVILEGES ON *.* TO 'wp' @'localhost' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO '${database_user}' @'localhost' WITH GRANT OPTION;
 
-CREATE USER 'wp' @'%' IDENTIFIED BY 'wordpress101';
+CREATE USER '${database_user}' @'%' IDENTIFIED BY '${database_pass}';
 
-GRANT ALL PRIVILEGES ON *.* TO 'wp' @'%' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO '${database_user}' @'%' WITH GRANT OPTION;
 
 FLUSH PRIVILEGES;
 
